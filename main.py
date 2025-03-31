@@ -578,9 +578,7 @@ class OpenLoop:
             elif result:
                 success_accounts.append(account)
         
-        # Save results
-        self.save_results("auth", success_accounts, failed_accounts)
-        return failed_accounts
+        return success_accounts, failed_accounts
 
     async def process_registration_batch(self, accounts_batch, use_proxy):
         """Process a batch of accounts for registration"""
@@ -603,9 +601,7 @@ class OpenLoop:
             elif result:
                 success_accounts.append(account)
         
-        # Save results
-        self.save_results("reg", success_accounts, failed_accounts)
-        return failed_accounts
+        return success_accounts, failed_accounts
 
     async def main(self):
         try:
@@ -633,6 +629,7 @@ class OpenLoop:
                 self.log(f"{Fore.CYAN + Style.BRIGHT}-{Style.RESET_ALL}"*75)
 
                 failed_accounts = []
+                success_accounts = []
                 batch_size = min(MAX_REG_THREADS, len(accounts))
                 total_batches = (len(accounts) + batch_size - 1) // batch_size
                 total_accounts = len(accounts)
@@ -647,9 +644,13 @@ class OpenLoop:
                         f"{Fore.CYAN}Processing batch {current_batch}/{total_batches} "
                         f"({len(batch)} accounts, progress: {accounts_processed}/{total_accounts}){Style.RESET_ALL}"
                     )
-                    batch_failed = await self.process_registration_batch(batch, use_proxy)
+                    batch_success, batch_failed = await self.process_registration_batch(batch, use_proxy)
+                    success_accounts.extend(batch_success)
                     failed_accounts.extend(batch_failed)
 
+                # Save all results after processing all batches
+                self.save_results("reg", success_accounts, failed_accounts)
+                
                 if failed_accounts:
                     self.log(f"{Fore.YELLOW}Failed registrations: {len(failed_accounts)}/{len(accounts)}{Style.RESET_ALL}")
                 else:
@@ -677,6 +678,7 @@ class OpenLoop:
                 self.log(f"{Fore.CYAN + Style.BRIGHT}-{Style.RESET_ALL}"*75)
 
                 failed_accounts = []
+                success_accounts = []
                 batch_size = min(MAX_AUTH_THREADS, len(accounts))
                 total_batches = (len(accounts) + batch_size - 1) // batch_size
                 total_accounts = len(accounts)
@@ -691,8 +693,12 @@ class OpenLoop:
                         f"{Fore.CYAN}Processing batch {current_batch}/{total_batches} "
                         f"({len(batch)} accounts, progress: {accounts_processed}/{total_accounts}){Style.RESET_ALL}"
                     )
-                    batch_failed = await self.process_auth_batch(batch, use_proxy)
+                    batch_success, batch_failed = await self.process_auth_batch(batch, use_proxy)
+                    success_accounts.extend(batch_success)
                     failed_accounts.extend(batch_failed)
+                
+                # Save all results after processing all batches
+                self.save_results("auth", success_accounts, failed_accounts)
                 
                 if failed_accounts:
                     self.log(f"{Fore.YELLOW}Failed to authorize: {len(failed_accounts)}/{len(accounts)}{Style.RESET_ALL}")
