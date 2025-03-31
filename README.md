@@ -18,6 +18,7 @@
 
 ## Features
 
+  - Auto Registration
   - Auto Authorization and Token Management
   - Auto Get Account Information
   - Auto Claim Rewards
@@ -27,7 +28,6 @@
   - Proxy Support for All Operations
   - Smart Token Management System
   - Support for Multiple Captcha Solvers (2captcha, CapMonster, AntiCaptcha, CFLSolver)
-  - **Coming Soon: Auto Registration with Email Verification**
 
 ## Requirements
 
@@ -39,10 +39,10 @@
 
 1. **Clone The Repository:**
    ```bash
-   git clone https://github.com/YourUsername/OpenLoop-BOT.git
+   git clone https://github.com/TellBip/OpenLoop.git
    ```
    ```bash
-   cd OpenLoop-BOT
+   cd OpenLoop
    ```
 
 2. **Install Requirements:**
@@ -68,19 +68,25 @@
    mkdir data
    ```
 
-2. **Authorization accounts:** Create `data/auth.txt` for authorization with format:
+2. **Registration accounts:** Create `data/reg.txt` for registration with format:
    ```
    email1@example.com:password1
    email2@example.com:password2
    ```
 
-3. **Farming accounts:** Create `data/farm.txt` for farming with format:
+3. **Authorization accounts:** Create `data/auth.txt` for authorization with format:
    ```
    email1@example.com:password1
    email2@example.com:password2
    ```
 
-4. **proxy.txt:** Create `data/proxy.txt` with your proxies in the following format:
+4. **Farming accounts:** Create `data/farm.txt` for farming with format:
+   ```
+   email1@example.com:password1
+   email2@example.com:password2
+   ```
+
+5. **proxy.txt:** Create `data/proxy.txt` with your proxies in the following format:
    ```
    ip:port # Default Protocol HTTP
    protocol://ip:port
@@ -88,7 +94,7 @@
    ```
    Supported protocols: http, https, socks4, socks5
 
-5. **config.py:** Configure captcha service and threads in `core/config.py`:
+6. **config.py:** Configure captcha service and threads in `core/config.py`:
    ```python
    # Captcha service settings
    CAPTCHA_SERVICE = "2captcha"  # Available: 2captcha, capmonster, anticaptcha, cflsolver
@@ -101,6 +107,7 @@
    # Authorization settings
    MAX_AUTH_THREADS = 5  # Maximum threads for authorization
    MAX_REG_THREADS = 3   # Maximum threads for registration
+   MAX_RETRIES = 3       # Maximum number of retries for API requests
 
    INVITE_CODE = "ol95e4a7e2"  # Referral code
    ```
@@ -113,11 +120,11 @@ python main.py #or python3 main.py
 ```
 
 The bot has 3 modes:
-1. Registration (Coming Soon)
-   - Will support automatic email verification
-   - Will save successful registrations to result/good_reg.txt
-   - Will save failed registrations to result/bad_reg.txt
-   - Will automatically save tokens to data/accounts.json
+1. Registration
+   - Registers accounts using INVITE_CODE from config
+   - Handles already registered accounts properly
+   - Saves successful registrations to result/good_reg.txt
+   - Saves failed registrations to result/bad_reg.txt
 
 2. Authorization
    - Gets and saves tokens
@@ -133,6 +140,8 @@ The bot has 3 modes:
 ## Results
 
 The bot creates a `result` folder with the following files:
+- good_reg.txt: Successfully registered accounts
+- bad_reg.txt: Failed registration attempts
 - good_auth.txt: Successfully authorized accounts
 - bad_auth.txt: Failed authorization attempts
 - good_farm.txt: Successfully farming accounts
