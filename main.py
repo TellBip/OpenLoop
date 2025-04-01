@@ -76,7 +76,7 @@ class OpenLoop:
 
     def log(self, message):
         print(
-            f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]{Style.RESET_ALL}"
+            f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().strftime('%x %X')} ]{Style.RESET_ALL}"
             f"{Fore.WHITE + Style.BRIGHT} | {Style.RESET_ALL}{message}",
             flush=True
         )
@@ -303,8 +303,8 @@ class OpenLoop:
                     async with session.post(url=url, headers=headers, data=data) as response:
                         result = await response.json()
                         
-                        # Check for successful registration
-                        if result.get("code") == 200 and result.get("message") == "Success":
+                        # Check for successful registration (code 2000 is also success)
+                        if result.get("code") in [200, 2000] or result.get("message") == "Success":
                             self.print_message(email, proxy, Fore.GREEN, "Registration successful")
                             return True
                         
