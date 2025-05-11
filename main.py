@@ -539,10 +539,10 @@ class OpenLoop:
             print(
                 f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]{Style.RESET_ALL}"
                 f"{Fore.WHITE + Style.BRIGHT} | {Style.RESET_ALL}"
-                f"{Fore.BLUE + Style.BRIGHT}Waiting 3 minutes until next PING...{Style.RESET_ALL}",
+                f"{Fore.BLUE + Style.BRIGHT}Waiting 15 minutes until next PING...{Style.RESET_ALL}",
                 end="\r"
             )
-            await asyncio.sleep(3 * 60)  # Send ping every 3 minutes
+            await asyncio.sleep(15 * 60)  # Send ping every 15 minutes
             
     async def process_accounts(self, email: str, password: str, use_proxy: bool):
         """Process individual account: authorization and start farm tasks"""
