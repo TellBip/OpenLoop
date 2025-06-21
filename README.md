@@ -28,6 +28,7 @@
   - Proxy Support for All Operations
   - Smart Token Management System
   - Support for Multiple Captcha Solvers (2captcha, CapMonster, AntiCaptcha, CFLSolver)
+  - Auto Connect Solana Wallet
 
 ## Requirements
 
@@ -86,7 +87,13 @@
    email2@example.com:password2
    ```
 
-5. **proxy.txt:** Create `data/proxy.txt` with your proxies in the following format:
+5. **Wallet connecting accounts:** Create `data/wallet.txt` for connecting wallets with format:
+   ```
+   email1@example.com:password1:your_solana_private_key_in_base58
+   email2@example.com:password2:your_solana_private_key_in_base58
+   ```
+
+6. **proxy.txt:** Create `data/proxy.txt` with your proxies in the following format:
    ```
    ip:port # Default Protocol HTTP
    protocol://ip:port
@@ -94,7 +101,7 @@
    ```
    Supported protocols: http, https, socks4, socks5
 
-6. **config.py:** Configure captcha service and threads in `core/config.py`:
+7. **config.py:** Configure captcha service and threads in `core/config.py`:
    ```python
    # Captcha service settings
    CAPTCHA_SERVICE = "2captcha"  # Available: 2captcha, capmonster, anticaptcha, cflsolver
@@ -112,6 +119,22 @@
    INVITE_CODE = "ol95e4a7e2"  # Referral code
    ```
 
+### Helper script for data preparation (`dop/merge_data.py`)
+
+To simplify the creation of `wallet.txt`, you can use the helper script located in the `dop` folder.
+
+1.  Place your source files inside the `dop` folder:
+    -   `email.txt` with the format `email:password`.
+    -   `private_keys.txt` with one Solana private key (in base58 format) per line.
+2.  Make sure the number of lines in both files is the same.
+3.  Navigate to the `dop` directory and run the script:
+    ```bash
+    cd dop
+    python merge_data.py
+    ```
+4.  The script will generate a `wallet.txt` file in the `dop` folder. Move this file to the main `data` directory (`mv wallet.txt ../data/`) for the bot to use.
+
+
 ## Usage
 
 Run the bot:
@@ -119,7 +142,7 @@ Run the bot:
 python main.py #or python3 main.py
 ```
 
-The bot has 3 modes:
+The bot has 4 modes:
 1. Registration
    - Registers accounts using INVITE_CODE from config
    - Handles already registered accounts properly
@@ -137,6 +160,11 @@ The bot has 3 modes:
    - Shows earnings in real-time
    - Automatic reconnection on errors
 
+4. Connect Wallet
+   - Connects Solana wallets to accounts using data from `data/wallet.txt`.
+   - Checks if a wallet is already connected before attempting to link a new one.
+   - Saves results to `result/good_wallet.txt` and `result/bad_wallet.txt`.
+
 ## Results
 
 The bot creates a `result` folder with the following files:
@@ -146,6 +174,8 @@ The bot creates a `result` folder with the following files:
 - bad_auth.txt: Failed authorization attempts
 - good_farm.txt: Successfully farming accounts
 - bad_farm.txt: Failed farming attempts
+- good_wallet.txt: Accounts with successfully connected wallets
+- bad_wallet.txt: Accounts where wallet connection failed
 
 Tokens are stored in `data/accounts.json` for future use.
 

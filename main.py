@@ -21,6 +21,10 @@ from core.captcha import ServiceCapmonster, ServiceAnticaptcha, Service2Captcha,
 from httpx import AsyncClient
 import asyncio, random, json, os, pytz
 from itertools import islice
+from solders.keypair import Keypair
+from solders.message import Message
+from solders.transaction import Transaction
+from base64 import b64encode
 
 # Setting time zone
 wib = pytz.timezone('Asia/Jakarta')
@@ -101,11 +105,12 @@ class OpenLoop:
         return f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
     
     def load_accounts(self, operation_type: str = None):
-        """Loads accounts based on operation type (reg/auth/farm)"""
+        """Loads accounts based on operation type (reg/auth/farm/connect_wallet)"""
         filename = {
             "reg": "data/reg.txt",
             "auth": "data/auth.txt",
-            "farm": "data/farm.txt"
+            "farm": "data/farm.txt",
+            "connect_wallet": "data/wallet.txt"
         }.get(operation_type, "accounts.txt")
 
         try:
@@ -116,7 +121,20 @@ class OpenLoop:
             with open(filename, 'r', encoding='utf-8') as file:
                 for line in file:
                     line = line.strip()
-                    if line and ':' in line:
+                    if not line:
+                        continue
+                    
+                    if operation_type == "connect_wallet":
+                        if ':' in line:
+                            parts = line.split(':', 2)
+                            if len(parts) == 3:
+                                email, password, private_key = parts
+                                accounts.append({
+                                    "Email": email.strip(), 
+                                    "Password": password.strip(), 
+                                    "PrivateKey": private_key.strip()
+                                })
+                    elif line and ':' in line:
                         email, password = line.split(':', 1)
                         accounts.append({"Email": email.strip(), "Password": password.strip()})
             return accounts
@@ -134,27 +152,35 @@ class OpenLoop:
             success_file = {
                 "reg": "result/good_reg.txt",
                 "auth": "result/good_auth.txt",
-                "farm": "result/good_farm.txt"
+                "farm": "result/good_farm.txt",
+                "connect_wallet": "result/good_wallet.txt"
             }.get(operation_type)
 
             failed_file = {
                 "reg": "result/bad_reg.txt",
                 "auth": "result/bad_auth.txt",
-                "farm": "result/bad_farm.txt"
+                "farm": "result/bad_farm.txt",
+                "connect_wallet": "result/bad_wallet.txt"
             }.get(operation_type)
 
             # Save successful accounts
             if success_accounts:
                 with open(success_file, 'w', encoding='utf-8') as f:
                     for account in success_accounts:
-                        f.write(f"{account['Email']}:{account['Password']}\n")
+                        if operation_type == 'connect_wallet':
+                            f.write(f"{account['Email']}:{account['Password']}:{account['PrivateKey']}\n")
+                        else:
+                            f.write(f"{account['Email']}:{account['Password']}\n")
                 self.log(f"{Fore.GREEN}Successful accounts saved to {success_file}{Style.RESET_ALL}")
 
             # Save failed accounts
             if failed_accounts:
                 with open(failed_file, 'w', encoding='utf-8') as f:
                     for account in failed_accounts:
-                        f.write(f"{account['Email']}:{account['Password']}\n")
+                        if operation_type == 'connect_wallet':
+                            f.write(f"{account['Email']}:{account['Password']}:{account['PrivateKey']}\n")
+                        else:
+                            f.write(f"{account['Email']}:{account['Password']}\n")
                 self.log(f"{Fore.YELLOW}Failed accounts saved to {failed_file}{Style.RESET_ALL}")
 
         except Exception as e:
@@ -166,20 +192,22 @@ class OpenLoop:
                 print("1. Registration")
                 print("2. Authorization")
                 print("3. Farm")
-                choose = int(input("Choose action [1/2/3] -> ").strip())
+                print("4. Connect Wallet")
+                choose = int(input("Choose action [1/2/3/4] -> ").strip())
 
-                if choose in [1, 2, 3]:
+                if choose in [1, 2, 3, 4]:
                     action_type = (
                         "Registration" if choose == 1 else 
                         "Authorization" if choose == 2 else 
-                        "Farm"
+                        "Farm" if choose == 3 else
+                        "Connect Wallet"
                     )
                     print(f"{Fore.GREEN + Style.BRIGHT}Selected: {action_type}{Style.RESET_ALL}")
                     return choose
                 else:
-                    print(f"{Fore.RED + Style.BRIGHT}Please enter a number from 1 to 3.{Style.RESET_ALL}")
+                    print(f"{Fore.RED + Style.BRIGHT}Please enter a number from 1 to 4.{Style.RESET_ALL}")
             except ValueError:
-                print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter a number (1, 2 or 3).{Style.RESET_ALL}")
+                print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter a number (1, 2, 3 or 4).{Style.RESET_ALL}")
 
     async def load_proxies(self):
         """Loading proxies from proxy.txt file"""
@@ -603,6 +631,122 @@ class OpenLoop:
         
         return success_accounts, failed_accounts
 
+    async def process_wallet_connect_batch(self, accounts_batch, use_proxy):
+        """Process a batch of accounts for wallet connection"""
+        tasks = []
+        failed_accounts = []
+        success_accounts = []
+        
+        for account in accounts_batch:
+            email = account.get('Email')
+            password = account.get('Password')
+            private_key = account.get('PrivateKey')
+            if email and password and private_key:
+                tasks.append(self.process_connect_wallet(email, password, private_key, use_proxy))
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for account, result in zip(accounts_batch, results):
+            if isinstance(result, Exception) or not result:
+                failed_accounts.append(account)
+            elif result:
+                success_accounts.append(account)
+        
+        return success_accounts, failed_accounts
+
+    async def process_connect_wallet(self, email: str, password: str, private_key: str, use_proxy: bool):
+        """Process for connecting a wallet to a single account."""
+        proxy = self.get_next_proxy_for_account(email) if use_proxy else None
+        token = self.get_saved_token(email)
+        if not token:
+            token = await self.get_access_token(email, password, use_proxy)
+
+        if not token:
+            self.print_message(email, proxy, Fore.RED, "Could not get token, skipping wallet connection.")
+            return False
+
+        profile_data = await self.get_user_profile(token, proxy)
+        if profile_data and profile_data.get("data", {}).get("address"):
+            wallet_address = profile_data["data"]["address"]
+            self.print_message(email, proxy, Fore.YELLOW, f"Wallet {wallet_address} already connected.")
+            return True
+
+        self.print_message(email, proxy, Fore.WHITE, "No wallet connected, proceeding to connect.")
+        
+        # Check for private key validity
+        try:
+            # For Solana, the private key is typically a base58 encoded string
+            Keypair.from_base58_string(private_key)
+        except Exception:
+            self.print_message(email, proxy, Fore.RED, "Invalid private key provided.")
+            return False
+
+        success = await self.connect_wallet(token, private_key, proxy)
+        if success:
+            self.print_message(email, proxy, Fore.GREEN, "Wallet connected successfully.")
+        else:
+            self.print_message(email, proxy, Fore.RED, "Failed to connect wallet.")
+        
+        return success
+
+    async def get_user_profile(self, token: str, proxy: str = None):
+        """Fetches user profile to check for a connected wallet."""
+        url = "https://api.openloop.so/users/profile"
+        headers = {**self.headers, "Authorization": f"Bearer {token}"}
+        connector = ProxyConnector.from_url(proxy) if proxy else None
+        try:
+            async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
+                async with session.get(url=url, headers=headers) as response:
+                    response.raise_for_status()
+                    return await response.json()
+        except (Exception, ClientResponseError) as e:
+            self.log(f"{Fore.RED}Error getting user profile: {e}{Style.RESET_ALL}")
+            return None
+
+    async def connect_wallet(self, token: str, private_key: str, proxy: str = None):
+        """Connects a Solana wallet by signing a message and sending it to the server."""
+        try:
+            # 1. Prepare wallet and message
+            message_to_sign = "Please sign this message to connect your wallet to OpenLoop and verifying your ownership only."
+            keypair = Keypair.from_base58_string(private_key)
+            wallet_address = str(keypair.pubkey())
+
+            # 2. Sign the message
+            # The solders library expects bytes, so we encode the message
+            signature = keypair.sign_message(message_to_sign.encode('utf-8'))
+            
+            # 3. Prepare request payload and headers
+            url = "https://api.openloop.so/users/link-wallet"
+            payload = {
+                "message": message_to_sign,
+                "wallet": wallet_address,
+                "signature": str(signature)  # Signature is base58 encoded by default
+            }
+            data = json.dumps(payload)
+            headers = {
+                **self.headers,
+                "Authorization": f"Bearer {token}",
+                "Content-Length": str(len(data)),
+                "Content-Type": "application/json",
+            }
+
+            # 4. Send the request
+            connector = ProxyConnector.from_url(proxy) if proxy else None
+            async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
+                async with session.post(url=url, headers=headers, data=data) as response:
+                    response.raise_for_status()
+                    result = await response.json()
+                    # Assuming a successful response contains a success message or specific code
+                    if result.get("code") in [200, 2000] or result.get("message") == "Success":
+                        return True
+                    else:
+                        self.log(f"{Fore.RED}Failed to link wallet, server response: {result}{Style.RESET_ALL}")
+                        return False
+
+        except (Exception, ClientResponseError) as e:
+            self.log(f"{Fore.RED}An error occurred while connecting the wallet: {e}{Style.RESET_ALL}")
+            return False
+
     async def main(self):
         try:
             self.welcome()
@@ -704,6 +848,55 @@ class OpenLoop:
                     self.log(f"{Fore.YELLOW}Failed to authorize: {len(failed_accounts)}/{len(accounts)}{Style.RESET_ALL}")
                 else:
                     self.log(f"{Fore.GREEN}All authorizations successful!{Style.RESET_ALL}")
+                return
+
+            # Connect Wallet
+            if action_choice == 4:
+                accounts = self.load_accounts("connect_wallet")
+                if not accounts:
+                    self.log(f"{Fore.RED+Style.BRIGHT}No accounts found in data/wallet.txt{Style.RESET_ALL}")
+                    return
+
+                use_proxy = True
+                self.clear_terminal()
+                self.welcome()
+                self.log(
+                    f"{Fore.GREEN + Style.BRIGHT}Total accounts for wallet connection: {Style.RESET_ALL}"
+                    f"{Fore.WHITE + Style.BRIGHT}{len(accounts)}{Style.RESET_ALL}"
+                )
+
+                if use_proxy:
+                    await self.load_proxies()
+
+                self.log(f"{Fore.CYAN + Style.BRIGHT}-{Style.RESET_ALL}"*75)
+
+                failed_accounts = []
+                success_accounts = []
+                # Using MAX_AUTH_THREADS for batch size, can be changed to a new config var if needed
+                batch_size = min(MAX_AUTH_THREADS, len(accounts))
+                total_batches = (len(accounts) + batch_size - 1) // batch_size
+                total_accounts = len(accounts)
+                
+                self.log(f"{Fore.CYAN}Starting wallet connection for {total_accounts} accounts in batches of {batch_size}{Style.RESET_ALL}")
+                
+                for i in range(0, len(accounts), batch_size):
+                    current_batch = i // batch_size + 1
+                    batch = list(islice(accounts, i, i + batch_size))
+                    accounts_processed = min(i + batch_size, total_accounts)
+                    self.log(
+                        f"{Fore.CYAN}Processing batch {current_batch}/{total_batches} "
+                        f"({len(batch)} accounts, progress: {accounts_processed}/{total_accounts}){Style.RESET_ALL}"
+                    )
+                    batch_success, batch_failed = await self.process_wallet_connect_batch(batch, use_proxy)
+                    success_accounts.extend(batch_success)
+                    failed_accounts.extend(batch_failed)
+                
+                self.save_results("connect_wallet", success_accounts, failed_accounts)
+                
+                if failed_accounts:
+                    self.log(f"{Fore.YELLOW}Failed to connect wallets for: {len(failed_accounts)}/{len(accounts)}{Style.RESET_ALL}")
+                else:
+                    self.log(f"{Fore.GREEN}All wallet connections successful!{Style.RESET_ALL}")
                 return
 
             # Farming
