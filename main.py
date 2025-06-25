@@ -193,21 +193,23 @@ class OpenLoop:
                 print("2. Authorization")
                 print("3. Farm")
                 print("4. Connect Wallet")
-                choose = int(input("Choose action [1/2/3/4] -> ").strip())
+                print("5. Check Airdrop")
+                choose = int(input("Choose action [1/2/3/4/5] -> ").strip())
 
-                if choose in [1, 2, 3, 4]:
+                if choose in [1, 2, 3, 4, 5]:
                     action_type = (
                         "Registration" if choose == 1 else 
                         "Authorization" if choose == 2 else 
                         "Farm" if choose == 3 else
-                        "Connect Wallet"
+                        "Connect Wallet" if choose == 4 else
+                        "Check Airdrop"
                     )
                     print(f"{Fore.GREEN + Style.BRIGHT}Selected: {action_type}{Style.RESET_ALL}")
                     return choose
                 else:
-                    print(f"{Fore.RED + Style.BRIGHT}Please enter a number from 1 to 4.{Style.RESET_ALL}")
+                    print(f"{Fore.RED + Style.BRIGHT}Please enter a number from 1 to 5.{Style.RESET_ALL}")
             except ValueError:
-                print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter a number (1, 2, 3 or 4).{Style.RESET_ALL}")
+                print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter a number (1, 2, 3, 4 or 5).{Style.RESET_ALL}")
 
     async def load_proxies(self):
         """Loading proxies from proxy.txt file"""
@@ -747,6 +749,59 @@ class OpenLoop:
             self.log(f"{Fore.RED}An error occurred while connecting the wallet: {e}{Style.RESET_ALL}")
             return False
 
+    async def get_airdrop_points(self, email: str, password: str, use_proxy: bool):
+        """Получить количество airdrop поинтов для аккаунта"""
+        proxy = self.get_next_proxy_for_account(email) if use_proxy else None
+        token = self.get_saved_token(email)
+        if not token:
+            token = await self.get_access_token(email, password, use_proxy)
+        if not token:
+            return None, "no_token"
+        url = "https://api.openloop.so/users/airdrop-point"
+        headers = {**self.headers, "Authorization": f"Bearer {token}"}
+        connector = ProxyConnector.from_url(proxy) if proxy else None
+        try:
+            async with ClientSession(connector=connector, timeout=ClientTimeout(total=60)) as session:
+                async with session.get(url=url, headers=headers) as response:
+                    response.raise_for_status()
+                    result = await response.json()
+                    if result.get("code") in [200, 2000]:
+                        return result.get("data", 0), None
+                    return None, "bad_response"
+        except Exception as e:
+            return None, str(e)
+
+    async def process_airdrop_batch(self, accounts_batch, use_proxy):
+        """Пакетная проверка airdrop поинтов"""
+        tasks = []
+        for account in accounts_batch:
+            email = account.get('Email')
+            password = account.get('Password')
+            if email and password:
+                tasks.append(self.get_airdrop_points(email, password, use_proxy))
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        good, bad = [], []
+        for account, result in zip(accounts_batch, results):
+            if isinstance(result, Exception) or result[0] is None:
+                bad.append(account)
+            else:
+                points = result[0]
+                good.append({"Email": account["Email"], "Password": account["Password"], "Points": points})
+        return good, bad
+
+    def save_airdrop_results(self, good, bad):
+        """Сохраняет результаты проверки airdrop"""
+        if not os.path.exists('result'):
+            os.makedirs('result')
+        if good:
+            with open('result/airdrop.txt', 'w', encoding='utf-8') as f:
+                for acc in good:
+                    f.write(f"{acc['Email']}:{acc['Password']}:{acc['Points']}\n")
+        if bad:
+            with open('result/bad_airdrop.txt', 'w', encoding='utf-8') as f:
+                for acc in bad:
+                    f.write(f"{acc['Email']}:{acc['Password']}\n")
+
     async def main(self):
         try:
             self.welcome()
@@ -897,6 +952,42 @@ class OpenLoop:
                     self.log(f"{Fore.YELLOW}Failed to connect wallets for: {len(failed_accounts)}/{len(accounts)}{Style.RESET_ALL}")
                 else:
                     self.log(f"{Fore.GREEN}All wallet connections successful!{Style.RESET_ALL}")
+                return
+
+            # Check Airdrop
+            if action_choice == 5:
+                accounts = self.load_accounts("auth")
+                if not accounts:
+                    self.log(f"{Fore.RED+Style.BRIGHT}No accounts found in data/auth.txt or accounts.txt{Style.RESET_ALL}")
+                    return
+                use_proxy = True
+                self.clear_terminal()
+                self.welcome()
+                self.log(
+                    f"{Fore.GREEN + Style.BRIGHT}Total accounts for airdrop check: {Style.RESET_ALL}"
+                    f"{Fore.WHITE + Style.BRIGHT}{len(accounts)}{Style.RESET_ALL}"
+                )
+                if use_proxy:
+                    await self.load_proxies()
+                self.log(f"{Fore.CYAN + Style.BRIGHT}-{Style.RESET_ALL}"*75)
+                batch_size = min(MAX_AUTH_THREADS, len(accounts))
+                total_batches = (len(accounts) + batch_size - 1) // batch_size
+                total_accounts = len(accounts)
+                self.log(f"{Fore.CYAN}Starting airdrop check for {total_accounts} accounts in batches of {batch_size}{Style.RESET_ALL}")
+                good, bad = [], []
+                for i in range(0, len(accounts), batch_size):
+                    current_batch = i // batch_size + 1
+                    batch = list(islice(accounts, i, i + batch_size))
+                    accounts_processed = min(i + batch_size, total_accounts)
+                    self.log(
+                        f"{Fore.CYAN}Processing batch {current_batch}/{total_batches} "
+                        f"({len(batch)} accounts, progress: {accounts_processed}/{total_accounts}){Style.RESET_ALL}"
+                    )
+                    batch_good, batch_bad = await self.process_airdrop_batch(batch, use_proxy)
+                    good.extend(batch_good)
+                    bad.extend(batch_bad)
+                self.save_airdrop_results(good, bad)
+                self.log(f"{Fore.GREEN}Airdrop check complete. Good: {len(good)}, Bad: {len(bad)}{Style.RESET_ALL}")
                 return
 
             # Farming
